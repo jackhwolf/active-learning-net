@@ -1,9 +1,0 @@
-**/*.lock
-**/dask-worker-space
-**/Scratch.ipynb
-**/__pycache__
-**/.ipynb_checkpoints
-**/venv
-**/worker-*
-**/*.dirlock
-**/Results

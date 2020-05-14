@@ -13,13 +13,14 @@ if __name__ == '__main__':
     from visualizer import Visualizer
     
     pset = {
-        'dims': 2,
-        'n': 5,
-        'epochs': 100,
+        'dims': 1,
+        'n': 10,
+        'epochs': 150000,
+        'optim_lr': [1e-2, 1e-3, 1e-4, 1e-5]
     }
 
     
-    e = Experiment("May13-2D-test", pset=pset)
+    e = Experiment("May13-1D", pset=pset)
     
     futures = cli.submit(e.go)
     futures = cli.gather(futures)

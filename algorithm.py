@@ -190,7 +190,11 @@ class Experiment:
 
         crit = kw.get('criterion', torch.nn.MSELoss)
         optim = kw.get('optimizer', torch.optim.Adam)
-        optim_args = kw.get('optim_args', {"lr": 1e-3, "weight_decay": 1e-5})
+        optim_args = kw.get('optim_args', {
+            "lr": kw.get('optim_lr', 1e-3), 
+            "weight_decay": kw.get('optim_weight_decay', 1e-5),
+            }
+        )
         model_args = kw.get('model_args', 
             (kw.get('dims', 1), kw.get('model_Nodes', 10), kw.get('model_dimOut', 1))
         )

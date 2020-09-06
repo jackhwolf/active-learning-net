@@ -23,17 +23,23 @@ class algorithm:
         self.r = 0
         self.log_ = {
             'state_dicts': {}, # state dicts for each round
-            'scores': []   # list of [[(i1, i2), (i2, s2)], ...]
+            'choice_i': [],    # list of [wi1, wi2, ...]
+            'scores': [],      # list of [[(i1, s1), (i2, s2)], ...]
+            'loss_vals': []    # list of [[(i1, l1), (i2, l2)], ...]
         }
         
     def build_model(self):
         return self.model_builder()
     
-    def log(self, sd, scores):
+    def log(self, sd, choice_i, scores, loss_vals):
         self.log_['state_dicts'][str(self.r)] = sd
         self.r += 1
+        if choice_i is not None:
+            self.log_['choice_i'].append(choice_i.copy())
         if scores is not None:
-            self.log_['scores'].append(scores)
+            self.log_['scores'].append(scores.copy())
+        if loss_vals is not None:
+            self.log_['loss_vals'].append(loss_vals.copy())
         return len(self.log_['state_dicts'])
     
     def start(self):
@@ -44,14 +50,14 @@ class algorithm:
         idxs = self.data.labeled_idxs
         sd = m.state_dict()
         del m
-        return self.log(sd, None)
+        return self.log(sd, None, None, None)
     
     def explore_label(self, x, y, label):
         y[[-1]] = label
         m = self.build_model()
-        _, score, _ = m.learn(x, y)
+        loss_val, score, _ = m.learn(x, y)
         del m
-        return score, label
+        return loss_val, score, label
     
     def explore_labels(self, x, y):
         labels = [[1.], [-1.]]
@@ -60,9 +66,10 @@ class algorithm:
             for label in labels:
                 futures.append(wc.submit(self.explore_label, x, y, label))
             futures = wc.gather(futures)
-        scores = [f[0] for f in futures]
+        loss_vals = [f[0] for f in futures]
+        scores = [f[1] for f in futures]
         i = np.argmin(scores)
-        return scores[i], labels[i]
+        return np.float64(loss_vals[i]), scores[i], labels[i]
 
     def explore_round(self):
         widx, wscr = -1, -1
@@ -74,37 +81,46 @@ class algorithm:
                 futures.append(wc.submit(self.explore_labels, feats, labls))
                 idxs.append(idx)
             futures = wc.gather(futures)
-        scores = [f[0] for f in futures]
+        loss_vals = [f[0] for f in futures]
+        scores = [f[1] for f in futures]
         i = np.argmax(scores)
-        return idxs[i], list(zip(idxs, scores))
+        i_scores = list(zip(idxs.copy(), scores))
+        i_lvals = list(zip(idxs.copy(), loss_vals))
+        return idxs[i], i_scores, i_lvals
     
     def explore(self):
         while self.data.has_unlabeled:
             print("Round: ", self.r)
-            choice_i, scores = self.explore_round()
+            choice_i, scores, loss_vals = self.explore_round()
             self.data.mark_labeled(choice_i)
             x, y = self.data.labeled_points
             m = self.build_model()
             loss, score, state_dict = m.learn(x, y)
-            self.log(state_dict, scores)
+            self.log(state_dict, choice_i, scores, loss_vals)
             time.sleep(0.25)
         return
-
-    def format_results(self):
+    
+    def _format_result(self, k):
         res = self.log_
-        scores = res['scores']
-        mat = np.full((len(self.data.labels), len(scores)), np.nan)
-        for i, s in enumerate(scores):
+        key = res[k]
+        mat = np.full((len(self.data.labels), len(key)), np.nan)
+        for i, s in enumerate(key):
             mask = np.array([False] * len(self.data.labels))
             s = np.array(s)
             mask[s[:,0].astype(int)] = True
             mat[:,i][mask] = s[:,1]
-        self.log_['scores'] = mat
+        self.log_[k] =  mat
+        return
+
+    def format_results(self):
+        self._format_result('scores')
+        self._format_result('loss_vals')
         return
     
     def run(self):
         self.start()
         self.explore()
+        print("done exploring!")
         self.format_results()
         return self.log_
 
@@ -132,7 +148,9 @@ class saver:
         os.makedirs(path, exist_ok=True)
         pt_path = path + '/state_dicts.pt'
         torch.save(algo.log_['state_dicts'], pt_path)
+        np.save(path + '/choice_i.npy', algo.log_['choice_i'])
         np.save(path + '/scores.npy', algo.log_['scores'])
+        np.save(path + '/loss_vals.npy', algo.log_['loss_vals'])
         with open(path + '/algo.json', 'w') as fp:
             fp.write(
                 json.dumps(self.json_algo(algo.data.path, model_args, 
@@ -152,7 +170,9 @@ class loader:
             js = json.loads(fp.read())
         data = load_dataset_path(js['data'])
         pt = torch.load(self.path + 'state_dicts.pt')
+        choice_i = np.load(self.path + 'choice_i.npy')
         scores = np.load(self.path + 'scores.npy')
+        loss_vals = np.load(self.path + 'loss_vals.npy')
         model_args = [int(_) for _ in js['model_args']]
         optim_args = {}
         for i, oa in enumerate(js['optim_args'][0]):
@@ -164,8 +184,12 @@ class loader:
         def mb():
             m = model(*model_args, crit(), optim, optim_args, epochs)
             return m
-        
-        return data, pt, scores, model_args, crit, optim, optim_args, mb
+        loaded = {
+            'data': data, 'pt': pt, 'scores': scores, 'loss_vals': loss_vals,
+            'choice_i': choice_i, 'crit': crit, 'optim': optim, 
+            'optim_args': optim_args, 'mb': mb
+        }
+        return loaded
             
         
 class Experiment:
@@ -186,8 +210,7 @@ class Experiment:
             yield i, foo.copy()
     
     def go_(self, **kw):
-        d = load_dataset(kw.get('dims', 1), kw.get('n', 10))
-
+        d = load_dataset(kw.get('dims', 1), kw.get('n', 10), spline=kw.get('spline', 5))
         crit = kw.get('criterion', torch.nn.MSELoss)
         optim = kw.get('optimizer', torch.optim.Adam)
         optim_args = kw.get('optim_args', {
@@ -206,6 +229,7 @@ class Experiment:
 
         # run algo
         algo = algorithm(d, mb)
+        print(algo.data.path)
         res = algo.run()
 
         # save algo

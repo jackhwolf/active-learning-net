@@ -14,13 +14,15 @@ if __name__ == '__main__':
     
     pset = {
         'dims': 1,
-        'n': 10,
-        'epochs': 150000,
-        'optim_lr': [1e-2, 1e-3, 1e-4, 1e-5]
+        'n': 15,
+        'model_Nodes': [10, 12],
+        'spline': 5,
+        'epochs': 250000,
+        'optim_lr': [1e-4]
     }
 
     
-    e = Experiment("May13-1D", pset=pset)
+    e = Experiment("Sept3-Experiment", pset=pset)
     
     futures = cli.submit(e.go)
     futures = cli.gather(futures)

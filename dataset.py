@@ -81,16 +81,16 @@ class dataset:
 
 class dataset1D(dataset):
     
-    def __init__(self, n, spline=SPLINE, **kw):
-        spline = int(spline)
+    def __init__(self, n, **kw):
         super(dataset1D, self).__init__(1, n)
+        self.spline = int(kw.get('spline', SPLINE))
         self.features = np.linspace(-1, 1, self.n).reshape(self.n, 1)
         label = -1
         for i in range(self.n):
-            if i % spline == 0:
+            if i % self.spline == 0:
                 label *= -1
             self.labels[i] = label
-        self.desc = f"dims=1&n={n}&spline={spline}"
+        self.desc = f"dims=1&n={n}&spline={self.spline}"
         
     def graph(self):
         fig, ax = plt.subplots()
@@ -157,7 +157,7 @@ def load_dataset(dims, n, fine=False, **kw):
         path = path.format(dims, f"{n}&spline={kw.get('spline', SPLINE)}")
     else:
         path = path.format(dims, f"{n}&decision={kw.get('decision', 'linear')}")
-    return construct_dataset(np.load(path), dims, n)
+    return construct_dataset(np.load(path), dims, n, **kw)
 
 def construct_dataset(mat, dims, n, **kw):
     if dims == 1:
